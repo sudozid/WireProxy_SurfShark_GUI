@@ -55,6 +55,8 @@ This is a **GUI frontend for wireproxy** specifically designed for SurfShark use
 
 ### **Step 2: Installation**
 
+**Note:** If you do not have git installed, you can simply download the zip from https://github.com/sudozid/WireProxy_SurfShark_GUI - Click on the green 'Code' button and select "Download ZIP", extract using 7zip or WinRAR, then skip the git clone step.
+
 #### **Option A: Simple Installation**
 ```bash
 # Clone the repository
