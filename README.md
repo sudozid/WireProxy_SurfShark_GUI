@@ -1,4 +1,3 @@
-```markdown
 # 🌊 SurfShark Wireproxy Manager
 
 <div align="center">
@@ -280,4 +279,3 @@ This project was made possible thanks to:
 > This is an **unofficial, third-party tool**. Users must have their own valid SurfShark subscription and WireGuard credentials.
 
 ---
-```
