@@ -25,6 +25,8 @@ import signal
 from pathlib import Path
 import shutil
 import stat
+import webbrowser
+import constants
 
 # Configure proper logging
 logging.basicConfig(
@@ -82,7 +84,7 @@ class AppSettings:
     minimize_to_tray: bool = True
     auto_start_proxies: bool = True
     log_level: LogLevel = LogLevel.DEBUG
-    api_endpoint: str = "https://api.surfshark.com/v4/server/clusters/generic"
+    api_endpoint: str = constants.API_ENDPOINT
 
 
 class ThreadSafeState:
@@ -306,7 +308,7 @@ class ProcessManager:
             logger.info("Getting latest wireproxy release info...")
 
             # Get latest release info from GitHub API
-            api_url = "https://api.github.com/repos/whyvl/wireproxy/releases/latest"
+            api_url = constants.GITHUB_API_URL
 
             try:
                 with urllib.request.urlopen(api_url, timeout=10) as response:
@@ -707,10 +709,6 @@ BindAddress = 127.0.0.1:{socks_port}
 class StateManager:
     """Handles saving and loading application state"""
 
-    SETTINGS_FILE = 'wireproxy_settings.json'
-    STATE_FILE = 'wireproxy_state.json'
-    CACHE_FILE = 'wireproxy_servers_cache.json'
-
     @staticmethod
     def save_settings(settings: AppSettings):
         """Save application settings"""
@@ -723,7 +721,7 @@ class StateManager:
                 'api_endpoint': settings.api_endpoint
             }
 
-            with open(StateManager.SETTINGS_FILE, 'w') as f:
+            with open(constants.SETTINGS_FILE, 'w') as f:
                 json.dump(settings_dict, f, indent=2)
 
             logger.debug("Settings saved successfully")
@@ -735,9 +733,9 @@ class StateManager:
     def load_settings() -> AppSettings:
         """Load application settings, create default file if it doesn't exist"""
         try:
-            if os.path.exists(StateManager.SETTINGS_FILE):
+            if os.path.exists(constants.SETTINGS_FILE):
                 # Load existing settings
-                with open(StateManager.SETTINGS_FILE, 'r') as f:
+                with open(constants.SETTINGS_FILE, 'r') as f:
                     settings_dict = json.load(f)
 
                 settings = AppSettings(
@@ -745,8 +743,7 @@ class StateManager:
                     minimize_to_tray=settings_dict.get('minimize_to_tray', True),
                     auto_start_proxies=settings_dict.get('auto_start_proxies', True),
                     log_level=LogLevel(settings_dict.get('log_level', LogLevel.DEBUG.value)),
-                    api_endpoint=settings_dict.get('api_endpoint',
-                                                   "https://api.surfshark.com/v4/server/clusters/generic")
+                    api_endpoint=settings_dict.get('api_endpoint', constants.API_ENDPOINT)
                 )
 
                 logger.debug("Settings loaded successfully from existing file")
@@ -759,7 +756,7 @@ class StateManager:
                 # Save the default settings to file
                 StateManager.save_settings(default_settings)
 
-                logger.info(f"Created default settings file: {StateManager.SETTINGS_FILE}")
+                logger.info(f"Created default settings file: {constants.SETTINGS_FILE}")
                 return default_settings
 
         except Exception as e:
@@ -785,7 +782,7 @@ class StateManager:
                 'timestamp': datetime.now().isoformat(),
                 'version': '1.0'
             }
-            with open(StateManager.CACHE_FILE, 'w', encoding='utf-8') as f:
+            with open(constants.CACHE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, indent=2, default=str)
             logger.debug(f"Cached {len(servers)} servers")
         except Exception as e:
@@ -795,10 +792,10 @@ class StateManager:
     def load_servers_cache() -> Optional[List[Dict[str, Any]]]:
         """Load servers from cache file"""
         try:
-            if not os.path.exists(StateManager.CACHE_FILE):
+            if not os.path.exists(constants.CACHE_FILE):
                 return None
 
-            with open(StateManager.CACHE_FILE, 'r', encoding='utf-8') as f:
+            with open(constants.CACHE_FILE, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
 
             # Check cache age (24 hours)
@@ -855,7 +852,7 @@ class StateManager:
                 }
                 state_dict['proxies'].append(proxy_data)
 
-            with open(StateManager.STATE_FILE, 'w', encoding='utf-8') as f:
+            with open(constants.STATE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(state_dict, f, indent=2, default=str)
 
             logger.info(f"Saved complete state with {len(proxy_instances)} proxies")
@@ -869,11 +866,11 @@ class StateManager:
         auto_restart_list = []
 
         try:
-            if not os.path.exists(StateManager.STATE_FILE):
+            if not os.path.exists(constants.STATE_FILE):
                 logger.debug("No saved state file found")
                 return auto_restart_list
 
-            with open(StateManager.STATE_FILE, 'r', encoding='utf-8') as f:
+            with open(constants.STATE_FILE, 'r', encoding='utf-8') as f:
                 state_dict = json.load(f)
 
             # Restore keys
@@ -1248,78 +1245,64 @@ class WireproxyManager:
         """Monitor running processes (runs in background thread)"""
         while not self.shutdown_event.is_set():
             try:
-                proxy_instances = self.state.get_proxy_instances()
-                running_processes = self.state.get_running_processes()
-
-                for i, instance in enumerate(proxy_instances):
-                    if (instance.status == ProxyStatus.RUNNING and
-                            i in running_processes):
-
-                        process_info = running_processes[i]
-
-                        if process_info.process.poll() is not None:
-                            self.log_message(
-                                f"Process for port {instance.port} has died unexpectedly",
-                                LogLevel.ERROR
-                            )
-
-                            self.state.update_proxy_status(i, ProxyStatus.STOPPED)
-                            removed_process = self.state.remove_running_process(i)
-
-                            if removed_process:
-                                try:
-                                    os.unlink(removed_process.config_file)
-                                except OSError:
-                                    pass
-
-                            self.gui_queue.put_proxy_list_update()
-
-                        else:
-                            # Monitor resource usage with limits
-                            try:
-                                ps_process = psutil.Process(process_info.process.pid)
-                                cpu_percent = ps_process.cpu_percent()
-                                memory_mb = ps_process.memory_info().rss / 1024 / 1024
-
-                                # Kill process if using too many resources
-                                if cpu_percent > 90:  # 90% CPU for 30 seconds
-                                    if process_info.high_cpu_start is None:  # Changed from hasattr
-                                        process_info.high_cpu_start = time.time()
-                                    elif time.time() - process_info.high_cpu_start > 30:
-                                        self.log_message(
-                                            f"Killing process on port {instance.port} due to high CPU usage",
-                                            LogLevel.WARNING
-                                        )
-                                        ProcessManager.stop_process_gracefully(process_info, timeout=2)
-                                        self.state.update_proxy_status(i, ProxyStatus.ERROR)
-                                        self.state.remove_running_process(i)
-                                        self.gui_queue.put_proxy_list_update()
-                                else:
-                                    # Reset high CPU timer
-                                    process_info.high_cpu_start = None  # Changed from delattr
-
-                                if cpu_percent > 1.0 or memory_mb > 50:  # Only log significant usage
-                                    self.log_message(
-                                        f"Port {instance.port}: CPU: {cpu_percent:.1f}%, "
-                                        f"Memory: {memory_mb:.1f}MB",
-                                        LogLevel.DEBUG
-                                    )
-                            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                                pass
-
-                # Check every 5 seconds
+                self._check_running_proxies()
                 self.shutdown_event.wait(5)
-
             except Exception as e:
                 self.log_message(f"Error in process monitor: {str(e)}", LogLevel.ERROR)
-                self.shutdown_event.wait(10)  # Wait longer on error
+                self.shutdown_event.wait(10)
+
+    def _check_running_proxies(self):
+        proxy_instances = self.state.get_proxy_instances()
+        running_processes = self.state.get_running_processes()
+        for i, instance in enumerate(proxy_instances):
+            if instance.status == ProxyStatus.RUNNING and i in running_processes:
+                process_info = running_processes[i]
+                if process_info.process.poll() is not None:
+                    self._handle_unexpected_process_termination(i, instance)
+                else:
+                    self._monitor_resource_usage(i, instance, process_info)
+
+    def _handle_unexpected_process_termination(self, index, instance):
+        self.log_message(f"Process for port {instance.port} has died unexpectedly", LogLevel.ERROR)
+        self.state.update_proxy_status(index, ProxyStatus.STOPPED)
+        removed_process = self.state.remove_running_process(index)
+        if removed_process:
+            try:
+                os.unlink(removed_process.config_file)
+            except OSError:
+                pass
+        self.gui_queue.put_proxy_list_update()
+
+    def _monitor_resource_usage(self, index, instance, process_info):
+        try:
+            ps_process = psutil.Process(process_info.process.pid)
+            cpu_percent = ps_process.cpu_percent()
+            memory_mb = ps_process.memory_info().rss / 1024 / 1024
+            self._check_cpu_usage(index, instance, process_info, cpu_percent)
+            if cpu_percent > 1.0 or memory_mb > 50:
+                self.log_message(f"Port {instance.port}: CPU: {cpu_percent:.1f}%, Memory: {memory_mb:.1f}MB", LogLevel.DEBUG)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+            pass
+
+    def _check_cpu_usage(self, index, instance, process_info, cpu_percent):
+        if cpu_percent > 90:
+            if process_info.high_cpu_start is None:
+                process_info.high_cpu_start = time.time()
+            elif time.time() - process_info.high_cpu_start > 30:
+                self.log_message(f"Killing process on port {instance.port} due to high CPU usage", LogLevel.WARNING)
+                ProcessManager.stop_process_gracefully(process_info, timeout=2)
+                self.state.update_proxy_status(index, ProxyStatus.ERROR)
+                self.state.remove_running_process(index)
+                self.gui_queue.put_proxy_list_update()
+        else:
+            process_info.high_cpu_start = None
 
     def load_servers(self):
         """Load servers from API with caching fallback"""
 
         def fetch_servers():
             try:
-                self.update_status("Loading servers...")
+                self.update_status(constants.STATUS_LOADING_SERVERS)
                 self.log_message("Starting server fetch from SurfShark API...", LogLevel.INFO)
 
                 # Try to fetch fresh servers
@@ -1336,7 +1319,7 @@ class WireproxyManager:
                     if servers:
                         self.log_message("Loaded servers from cache", LogLevel.INFO)
                     else:
-                        self.update_status("Error loading servers")
+                        self.update_status(constants.STATUS_ERROR_LOADING_SERVERS)
                         self.log_message("Failed to load servers from API and cache", LogLevel.ERROR)
                         return
 
@@ -1354,12 +1337,12 @@ class WireproxyManager:
                     LogLevel.INFO
                 )
 
-                self.update_status(f"Ready - {total_countries} countries, {total_locations} locations")
+                self.update_status(constants.STATUS_READY.format(countries=total_countries, locations=total_locations))
                 self.gui_queue.put_server_update(country_options)
 
             except Exception as e:
                 self.log_message(f"Error loading servers: {str(e)}", LogLevel.ERROR)
-                self.update_status("Error loading servers")
+                self.update_status(constants.STATUS_ERROR_LOADING_SERVERS)
 
         # Use thread pool for better management
         self.thread_pool.submit(fetch_servers)
@@ -1379,12 +1362,12 @@ class WireproxyManager:
             # Validation
             if not country:
                 self.log_message("No country selected", LogLevel.WARNING)
-                messagebox.showerror("Error", "Please select a country")
+                messagebox.showerror(constants.NO_COUNTRY_SELECTED_TITLE, constants.NO_COUNTRY_SELECTED_MESSAGE)
                 return
 
             if not port or port < 1024 or port > 65535:
                 self.log_message(f"Invalid port number: {port}", LogLevel.WARNING)
-                messagebox.showerror("Error", "Please enter a valid port (1024-65535)")
+                messagebox.showerror(constants.INVALID_PORT_TITLE, constants.INVALID_PORT_MESSAGE)
                 return
 
             # Check for port conflicts
@@ -1392,7 +1375,7 @@ class WireproxyManager:
             for instance in proxy_instances:
                 if instance.port == port:
                     self.log_message(f"Port {port} already in use", LogLevel.WARNING)
-                    messagebox.showerror("Error", f"Port {port} is already in use")
+                    messagebox.showerror(constants.PORT_IN_USE_TITLE, constants.PORT_IN_USE_MESSAGE.format(port=port))
                     return
 
             # Check if port is available on system
@@ -1403,26 +1386,26 @@ class WireproxyManager:
                 self.log_message(f"Port {port} is available", LogLevel.DEBUG)
             except OSError:
                 self.log_message(f"Port {port} is in use by another application", LogLevel.WARNING)
-                messagebox.showerror("Error", f"Port {port} is already in use by another application")
+                messagebox.showerror(constants.PORT_IN_USE_BY_OTHER_APP_TITLE, constants.PORT_IN_USE_BY_OTHER_APP_MESSAGE.format(port=port))
                 return
 
             # Get servers for selection
             servers = self.state.get_servers()
             if not servers:
                 self.log_message("No servers loaded", LogLevel.ERROR)
-                messagebox.showerror("Error", "Servers not loaded. Please wait or reload servers.")
+                messagebox.showerror(constants.SERVERS_NOT_LOADED_TITLE, constants.SERVERS_NOT_LOADED_MESSAGE)
                 return
 
             country_servers = ServerManager.get_servers_by_selection(servers, country)
             if not country_servers:
                 self.log_message(f"No servers found for {country}", LogLevel.ERROR)
-                messagebox.showerror("Error", f"No servers found for {country}")
+                messagebox.showerror(constants.NO_SERVERS_FOUND_TITLE, constants.NO_SERVERS_FOUND_MESSAGE.format(country=country))
                 return
 
             chosen_server = ServerManager.select_best_server(country_servers)
             if not chosen_server:
                 self.log_message(f"Could not select server for {country}", LogLevel.ERROR)
-                messagebox.showerror("Error", f"Could not select server for {country}")
+                messagebox.showerror(constants.COULD_NOT_SELECT_SERVER_TITLE, constants.COULD_NOT_SELECT_SERVER_MESSAGE.format(country=country))
                 return
 
             self.log_message(
@@ -1457,7 +1440,7 @@ class WireproxyManager:
 
         except Exception as e:
             self.log_message(f"Error adding proxy: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to add proxy: {str(e)}")
+            messagebox.showerror(constants.ADD_PROXY_ERROR_TITLE, constants.ADD_PROXY_ERROR_MESSAGE.format(error=str(e)))
 
     def remove_proxy(self):
         """Remove selected proxy with proper cleanup"""
@@ -1468,7 +1451,7 @@ class WireproxyManager:
             selection = self.proxy_listbox.curselection()
             if not selection:
                 self.log_message("No proxy selected for removal", LogLevel.WARNING)
-                messagebox.showwarning("Warning", "Please select a proxy to remove")
+                messagebox.showwarning(constants.REMOVE_PROXY_WARNING_TITLE, constants.REMOVE_PROXY_WARNING_MESSAGE)
                 return
 
             index = selection[0]
@@ -1496,7 +1479,7 @@ class WireproxyManager:
 
         except Exception as e:
             self.log_message(f"Error removing proxy: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to remove proxy: {str(e)}")
+            messagebox.showerror(constants.REMOVE_PROXY_ERROR_TITLE, constants.REMOVE_PROXY_ERROR_MESSAGE.format(error=str(e)))
 
     def start_proxy(self):
         """Start selected proxy with comprehensive error handling"""
@@ -1507,7 +1490,7 @@ class WireproxyManager:
             selection = self.proxy_listbox.curselection()
             if not selection:
                 self.log_message("No proxy selected for start operation", LogLevel.WARNING)
-                messagebox.showwarning("Warning", "Please select a proxy to start")
+                messagebox.showwarning(constants.START_PROXY_WARNING_TITLE, constants.START_PROXY_WARNING_MESSAGE)
                 return
 
             index = selection[0]
@@ -1515,7 +1498,7 @@ class WireproxyManager:
 
         except Exception as e:
             self.log_message(f"Error starting proxy: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to start proxy: {str(e)}")
+            messagebox.showerror(constants.START_PROXY_ERROR_TITLE, constants.START_PROXY_ERROR_MESSAGE.format(error=str(e)))
 
     def _start_proxy_by_index(self, index: int):
         """Start proxy by index"""
@@ -1532,7 +1515,7 @@ class WireproxyManager:
         private_key, public_key = self.state.get_keys()
         if not private_key or not public_key:
             self.log_message("WireGuard keys not configured", LogLevel.ERROR)
-            messagebox.showerror("Error", "Please configure WireGuard keys first")
+            messagebox.showerror(constants.WIREGUARD_KEYS_NOT_CONFIGURED_TITLE, constants.WIREGUARD_KEYS_NOT_CONFIGURED_MESSAGE)
             return
 
         # Update status immediately
@@ -1603,7 +1586,7 @@ class WireproxyManager:
             selection = self.proxy_listbox.curselection()
             if not selection:
                 self.log_message("No proxy selected for stop operation", LogLevel.WARNING)
-                messagebox.showwarning("Warning", "Please select a proxy to stop")
+                messagebox.showwarning(constants.STOP_PROXY_WARNING_TITLE, constants.STOP_PROXY_WARNING_MESSAGE)
                 return
 
             index = selection[0]
@@ -1614,7 +1597,7 @@ class WireproxyManager:
 
         except Exception as e:
             self.log_message(f"Error stopping proxy: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to stop proxy: {str(e)}")
+            messagebox.showerror(constants.STOP_PROXY_ERROR_TITLE, constants.STOP_PROXY_ERROR_MESSAGE.format(error=str(e)))
 
     def _stop_proxy_by_index(self, index: int):
         """Stop proxy by index (internal method)"""
@@ -1694,7 +1677,7 @@ class WireproxyManager:
             selection = self.proxy_listbox.curselection()
             if not selection:
                 self.log_message("No proxy selected for config export", LogLevel.WARNING)
-                messagebox.showwarning("Warning", "Please select a proxy to export")
+                messagebox.showwarning(constants.EXPORT_CONFIG_WARNING_TITLE, constants.EXPORT_CONFIG_WARNING_MESSAGE)
                 return
 
             index = selection[0]
@@ -1705,7 +1688,7 @@ class WireproxyManager:
 
             private_key, _ = self.state.get_keys()
             if not private_key:
-                messagebox.showerror("Error", "WireGuard keys not configured")
+                messagebox.showerror(constants.WIREGUARD_KEYS_NOT_CONFIGURED_TITLE, constants.WIREGUARD_KEYS_NOT_CONFIGURED_MESSAGE)
                 return
 
             wg_config = ConfigurationManager.generate_wireguard_config(instance.server, private_key)
@@ -1722,11 +1705,11 @@ class WireproxyManager:
                     f.write(wireproxy_config)
 
                 self.log_message(f"Config exported to {filename}", LogLevel.INFO)
-                messagebox.showinfo("Success", f"Config exported to {filename}")
+                messagebox.showinfo(constants.EXPORT_CONFIG_SUCCESS_TITLE, constants.EXPORT_CONFIG_SUCCESS_MESSAGE.format(filename=filename))
 
         except Exception as e:
             self.log_message(f"Error exporting config: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to export config: {str(e)}")
+            messagebox.showerror(constants.EXPORT_CONFIG_ERROR_TITLE, constants.EXPORT_CONFIG_ERROR_MESSAGE.format(error=str(e)))
 
     def show_config(self):
         """Show generated config in a popup"""
@@ -1736,7 +1719,7 @@ class WireproxyManager:
 
             selection = self.proxy_listbox.curselection()
             if not selection:
-                messagebox.showwarning("Warning", "Please select a proxy")
+                messagebox.showwarning(constants.SHOW_CONFIG_WARNING_TITLE, constants.SHOW_CONFIG_WARNING_MESSAGE)
                 return
 
             index = selection[0]
@@ -1747,7 +1730,7 @@ class WireproxyManager:
 
             private_key, _ = self.state.get_keys()
             if not private_key:
-                messagebox.showerror("Error", "WireGuard keys not configured")
+                messagebox.showerror(constants.WIREGUARD_KEYS_NOT_CONFIGURED_TITLE, constants.WIREGUARD_KEYS_NOT_CONFIGURED_MESSAGE)
                 return
 
             wg_config = ConfigurationManager.generate_wireguard_config(instance.server, private_key)
@@ -1791,11 +1774,11 @@ class WireproxyManager:
 
                 file_size = os.path.getsize(filename)
                 self.log_message(f"Log saved to {filename} ({file_size} bytes)", LogLevel.INFO)
-                messagebox.showinfo("Success", f"Log saved to {filename}")
+                messagebox.showinfo(constants.SAVE_LOG_SUCCESS_TITLE, constants.SAVE_LOG_SUCCESS_MESSAGE.format(filename=filename))
 
         except Exception as e:
             self.log_message(f"Error saving log: {str(e)}", LogLevel.ERROR)
-            messagebox.showerror("Error", f"Failed to save log: {str(e)}")
+            messagebox.showerror(constants.SAVE_LOG_ERROR_TITLE, constants.SAVE_LOG_ERROR_MESSAGE.format(error=str(e)))
 
     def change_log_level(self):
         """Unified log level change method"""
@@ -2054,184 +2037,123 @@ class WireproxyManager:
 
     def _create_about_section(self, parent):
         """Create about section with wireproxy management"""
-        frame = ttk.LabelFrame(parent, text="About & System Info", padding=15)
+        frame = ttk.LabelFrame(parent, text=constants.ABOUT_FRAME_TITLE, padding=15)
+        self._create_about_info_section(frame)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(15, 15))
+        self._create_wireproxy_status_section(frame)
+        return frame
 
-        # Application info
+    def _create_about_info_section(self, parent):
         about_text = (
-            "SurfShark Wireproxy Manager\n"
-            "Version 1.0.0\n"
+            f"{constants.APP_NAME}\n"
+            f"Version {constants.APP_VERSION}\n"
             "Manage multiple SOCKS5 proxies via WireGuard"
         )
-        ttk.Label(frame, text=about_text, foreground="gray").pack(anchor="w")
+        ttk.Label(parent, text=about_text, foreground="gray").pack(anchor="w")
+        ttk.Button(parent, text="Check for Updates", command=self.check_for_updates).pack(anchor="w", pady=(10, 0))
+        ttk.Button(parent, text="View on GitHub", command=lambda: webbrowser.open("https://github.com/your-repo")).pack(anchor="w", pady=(10, 0))
 
-        # Add separator
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(15, 15))
-
-        # Wireproxy status section
-        wireproxy_section = ttk.LabelFrame(frame, text="wireproxy Binary", padding=10)
+    def _create_wireproxy_status_section(self, parent):
+        wireproxy_section = ttk.LabelFrame(parent, text=constants.WIREDPROXY_BINARY_FRAME_TITLE, padding=10)
         wireproxy_section.pack(fill="x", pady=(0, 10))
-
-        # Check current wireproxy version and info
         current_wireproxy = ProcessManager.find_wireproxy_executable()
-
-        status_frame = ttk.Frame(wireproxy_section)
-        status_frame.pack(fill="x", pady=(0, 10))
-
-        if current_wireproxy:
-            # Status
-            status_label = ttk.Label(status_frame, text="Status: ", font=("Arial", 9, "bold"))
-            status_label.pack(side="left")
-            ttk.Label(status_frame, text="✓ Found", foreground="green",
-                      font=("Arial", 9, "bold")).pack(side="left")
-
-            # Location
-            location_frame = ttk.Frame(wireproxy_section)
-            location_frame.pack(fill="x", pady=(2, 0))
-            ttk.Label(location_frame, text="Location: ", font=("Arial", 9, "bold")).pack(side="left")
-            location_text = current_wireproxy
-            if len(location_text) > 60:  # Truncate long paths
-                location_text = "..." + location_text[-57:]
-            ttk.Label(location_frame, text=location_text, font=("Arial", 8),
-                      foreground="gray").pack(side="left")
-
-            # File size and modification date
-            try:
-                import os
-                from datetime import datetime
-
-                stat_info = os.stat(current_wireproxy)
-                file_size = stat_info.st_size
-                mod_time = datetime.fromtimestamp(stat_info.st_mtime)
-
-                # File size
-                size_frame = ttk.Frame(wireproxy_section)
-                size_frame.pack(fill="x", pady=(2, 0))
-                ttk.Label(size_frame, text="Size: ", font=("Arial", 9, "bold")).pack(side="left")
-
-                if file_size < 1024:
-                    size_text = f"{file_size} bytes"
-                elif file_size < 1024 * 1024:
-                    size_text = f"{file_size / 1024:.1f} KB"
-                else:
-                    size_text = f"{file_size / (1024 * 1024):.1f} MB"
-
-                ttk.Label(size_frame, text=size_text, font=("Arial", 8),
-                          foreground="gray").pack(side="left")
-
-                # Modification date
-                date_frame = ttk.Frame(wireproxy_section)
-                date_frame.pack(fill="x", pady=(2, 0))
-                ttk.Label(date_frame, text="Modified: ", font=("Arial", 9, "bold")).pack(side="left")
-                ttk.Label(date_frame, text=mod_time.strftime("%Y-%m-%d %H:%M:%S"),
-                          font=("Arial", 8), foreground="gray").pack(side="left")
-
-            except Exception as e:
-                # If we can't get file info, just show that it exists
-                pass
-
-            # Try to get version info if possible
-            try:
-                import subprocess
-                result = subprocess.run([current_wireproxy, '--version'],
-                                        capture_output=True, text=True, timeout=5)
-                if result.returncode == 0 and result.stdout.strip():
-                    version_frame = ttk.Frame(wireproxy_section)
-                    version_frame.pack(fill="x", pady=(2, 0))
-                    ttk.Label(version_frame, text="Version: ", font=("Arial", 9, "bold")).pack(side="left")
-                    version_text = result.stdout.strip().replace('\n', ' ')[:50]  # Limit length
-                    ttk.Label(version_frame, text=version_text, font=("Arial", 8),
-                              foreground="gray").pack(side="left")
-            except:
-                # Version check failed, that's ok
-                pass
-
-        else:
-            # Not found
-            ttk.Label(status_frame, text="Status: ", font=("Arial", 9, "bold")).pack(side="left")
-            ttk.Label(status_frame, text="✗ Not found", foreground="red",
-                      font=("Arial", 9, "bold")).pack(side="left")
-
-            ttk.Label(wireproxy_section, text="wireproxy binary not found in PATH or common locations.",
-                      font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(5, 0))
-
-        # Separator
+        self._create_wireproxy_status_display(wireproxy_section, current_wireproxy)
         ttk.Separator(wireproxy_section, orient='horizontal').pack(fill='x', pady=(10, 10))
+        self._create_wireproxy_download_section(wireproxy_section)
 
-        # Download section
-        download_frame = ttk.Frame(wireproxy_section)
+    def _create_wireproxy_status_display(self, parent, current_wireproxy):
+        status_frame = ttk.Frame(parent)
+        status_frame.pack(fill="x", pady=(0, 10))
+        if current_wireproxy:
+            self._display_wireproxy_found(status_frame, current_wireproxy)
+        else:
+            self._display_wireproxy_not_found(status_frame)
+
+    def _display_wireproxy_found(self, parent, current_wireproxy):
+        ttk.Label(parent, text=constants.WIREDPROXY_STATUS_LABEL, font=("Arial", 9, "bold")).pack(side="left")
+        ttk.Label(parent, text=constants.WIREDPROXY_FOUND_STATUS, foreground="green", font=("Arial", 9, "bold")).pack(side="left")
+        self._display_wireproxy_details(parent, current_wireproxy)
+
+    def _display_wireproxy_not_found(self, parent):
+        ttk.Label(parent, text=constants.WIREDPROXY_STATUS_LABEL, font=("Arial", 9, "bold")).pack(side="left")
+        ttk.Label(parent, text=constants.WIREDPROXY_NOT_FOUND_STATUS, foreground="red", font=("Arial", 9, "bold")).pack(side="left")
+        ttk.Label(parent, text="wireproxy binary not found in PATH or common locations.", font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(5, 0))
+
+    def _display_wireproxy_details(self, parent, current_wireproxy):
+        self._display_wireproxy_detail(parent, constants.WIREDPROXY_LOCATION_LABEL, current_wireproxy)
+        try:
+            stat_info = os.stat(current_wireproxy)
+            file_size = stat_info.st_size
+            mod_time = datetime.fromtimestamp(stat_info.st_mtime)
+            size_text = f"{file_size / 1024:.1f} KB" if file_size >= 1024 else f"{file_size} bytes"
+            self._display_wireproxy_detail(parent, constants.WIREDPROXY_SIZE_LABEL, size_text)
+            self._display_wireproxy_detail(parent, constants.WIREDPROXY_MODIFIED_LABEL, mod_time.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
+        try:
+            result = subprocess.run([current_wireproxy, '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip():
+                version_text = result.stdout.strip().replace('\n', ' ')[:50]
+                self._display_wireproxy_detail(parent, constants.WIREDPROXY_VERSION_LABEL, version_text)
+        except Exception:
+            pass
+
+    def _display_wireproxy_detail(self, parent, label, value):
+        frame = ttk.Frame(parent)
+        frame.pack(fill="x", pady=(2, 0))
+        ttk.Label(frame, text=label, font=("Arial", 9, "bold")).pack(side="left")
+        ttk.Label(frame, text=value, font=("Arial", 8), foreground="gray").pack(side="left")
+
+    def _create_wireproxy_download_section(self, parent):
+        download_frame = ttk.Frame(parent)
         download_frame.pack(fill="x")
-
-        def download_latest_wireproxy():
-            """Download latest wireproxy version with progress feedback"""
-            try:
-                # Disable button during download
-                download_btn.config(state="disabled", text="Downloading...")
-                self.preferences_window.update()
-
-                if ProcessManager._download_wireproxy():
-                    self.log_message("Latest wireproxy downloaded successfully", LogLevel.INFO)
-                    messagebox.showinfo("Success", "Latest wireproxy version downloaded successfully!")
-                    # Refresh the preferences window to show new info
-                    self.preferences_window.destroy()
-                    self.show_preferences()
-                else:
-                    self.log_message("Failed to download wireproxy", LogLevel.ERROR)
-                    messagebox.showerror("Error",
-                                         "Failed to download wireproxy. Please check your internet connection and try again.")
-            except Exception as e:
-                self.log_message(f"Error during wireproxy download: {str(e)}", LogLevel.ERROR)
-                messagebox.showerror("Error", f"Download failed: {str(e)}")
-            finally:
-                # Re-enable button
-                try:
-                    download_btn.config(state="normal", text="Download Latest Version")
-                except:
-                    pass
-
-        def check_latest_version():
-            """Check what the latest version is without downloading"""
-            try:
-                import urllib.request
-                api_url = "https://api.github.com/repos/whyvl/wireproxy/releases/latest"
-                with urllib.request.urlopen(api_url, timeout=10) as response:
-                    release_data = json.loads(response.read().decode())
-                latest_version = release_data.get('tag_name', 'unknown')
-                published_date = release_data.get('published_at', '')
-                if published_date:
-                    from datetime import datetime
-                    pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
-                    date_str = pub_date.strftime("%Y-%m-%d")
-                else:
-                    date_str = "unknown date"
-
-                messagebox.showinfo("Latest Version",
-                                    f"Latest wireproxy version: {latest_version}\n"
-                                    f"Published: {date_str}\n\n"
-                                    f"GitHub: https://github.com/whyvl/wireproxy/releases/latest")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to check latest version: {str(e)}")
-
-        # Buttons
         button_frame = ttk.Frame(download_frame)
         button_frame.pack(anchor="w")
-
-        download_btn = ttk.Button(button_frame, text="Download Latest Version",
-                                  command=download_latest_wireproxy)
+        download_btn = ttk.Button(button_frame, text=constants.DOWNLOAD_LATEST_BUTTON, command=self._download_latest_wireproxy)
         download_btn.pack(side="left", padx=(0, 10))
-
-        ttk.Button(button_frame, text="Check Latest Version",
-                   command=check_latest_version).pack(side="left", padx=(0, 10))
-
-        # Info text
+        ttk.Button(button_frame, text=constants.CHECK_LATEST_BUTTON, command=self._check_latest_version).pack(side="left", padx=(0, 10))
         info_text = (
             "• Downloads from: https://github.com/whyvl/wireproxy/releases\n"
             "• Automatically detects your platform and architecture\n"
             "• Replaces existing binary if found"
         )
-        ttk.Label(wireproxy_section, text=info_text, font=("Arial", 8),
-                  foreground="gray").pack(anchor="w", pady=(10, 0))
+        ttk.Label(parent, text=info_text, font=("Arial", 8), foreground="gray").pack(anchor="w", pady=(10, 0))
 
-        return frame
+    def _download_latest_wireproxy(self):
+        """Download latest wireproxy version with progress feedback"""
+        try:
+            if ProcessManager._download_wireproxy():
+                self.log_message("Latest wireproxy downloaded successfully", LogLevel.INFO)
+                messagebox.showinfo("Success", "Latest wireproxy version downloaded successfully!")
+                self.preferences_window.destroy()
+                self.show_preferences()
+            else:
+                self.log_message("Failed to download wireproxy", LogLevel.ERROR)
+                messagebox.showerror("Error", "Failed to download wireproxy. Please check your internet connection and try again.")
+        except Exception as e:
+            self.log_message(f"Error during wireproxy download: {str(e)}", LogLevel.ERROR)
+            messagebox.showerror("Error", f"Download failed: {str(e)}")
+
+    def _check_latest_version(self):
+        """Check what the latest version is without downloading"""
+        try:
+            api_url = "https://api.github.com/repos/whyvl/wireproxy/releases/latest"
+            with requests.get(api_url, timeout=10) as response:
+                response.raise_for_status()
+                release_data = response.json()
+            latest_version = release_data.get('tag_name', 'unknown')
+            published_date = release_data.get('published_at', '')
+            if published_date:
+                pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+                date_str = pub_date.strftime("%Y-%m-%d")
+            else:
+                date_str = "unknown date"
+            messagebox.showinfo("Latest Version",
+                                f"Latest wireproxy version: {latest_version}\n"
+                                f"Published: {date_str}\n\n"
+                                f"GitHub: https://github.com/whyvl/wireproxy/releases/latest")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to check latest version: {str(e)}")
 
     def _save_preferences(self, start_minimized, minimize_to_tray, auto_start_proxies, api_endpoint):
         """Save preferences and validate input"""
@@ -2348,138 +2270,164 @@ class WireproxyManager:
         if self.root:
             self.root.destroy()
 
+    def check_for_updates(self):
+        """Check for new versions of the application on GitHub."""
+        try:
+            api_url = f"https://api.github.com/repos/your-repo/releases/latest"
+            response = requests.get(api_url, timeout=10)
+            response.raise_for_status()
+            latest_version = response.json()['tag_name']
+
+            if latest_version > constants.APP_VERSION:
+                messagebox.showinfo("Update Available", f"A new version ({latest_version}) is available!")
+            else:
+                messagebox.showinfo("No Updates", "You are using the latest version.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to check for updates: {str(e)}")
+
     def create_gui(self):
         """Create the main GUI with wireproxy executable check"""
         self.root = tk.Tk()
-        self.root.title("SurfShark Wireproxy Manager")
+        self.root.title(constants.TITLE)
         self.root.geometry("1000x700")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # Check for wireproxy executable
         if not ProcessManager.find_wireproxy_executable():
             self.log_message("wireproxy executable not found in PATH", LogLevel.ERROR)
             messagebox.showerror(
-                "Missing Dependency",
-                "wireproxy executable not found in PATH or current directory.\n\n"
-                "Please install wireproxy and ensure it's in your PATH, or place the executable "
-                "in the same directory as this application.\n\n"
-                "Download from: https://github.com/octeep/wireproxy"
+                constants.MISSING_DEPENDENCY_TITLE,
+                constants.MISSING_DEPENDENCY_MESSAGE
             )
 
-        # Hide window initially if starting minimized
         if self.settings.start_minimized:
             self.root.withdraw()
 
-        # Main frame
+        main_frame = self._create_main_frame()
+        self._create_keys_frame(main_frame)
+        self._create_config_frame(main_frame)
+        self._create_management_frame(main_frame)
+        self._create_status_bar(main_frame)
+
+        self.root.bind('<Unmap>', self._on_minimize)
+
+        return self.root
+
+    def _create_main_frame(self):
+        style = ttk.Style()
+        style.theme_use("clam")
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        # Configure grid weights
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(3, weight=1)
-
-        # Title
-        title_label = ttk.Label(main_frame, text="SurfShark Wireproxy Manager", font=("Arial", 16, "bold"))
+        title_label = ttk.Label(main_frame, text=constants.TITLE, font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        return main_frame
 
-        # Keys Configuration Frame
-        keys_frame = ttk.LabelFrame(main_frame, text="WireGuard Keys", padding="10")
-        keys_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+    def _create_keys_frame(self, parent):
+        keys_frame = ttk.LabelFrame(parent, text=constants.KEYS_FRAME_TITLE, padding=(10, 5))
+        keys_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10), padx=5)
         keys_frame.columnconfigure(1, weight=1)
-
-        # Private Key
-        ttk.Label(keys_frame, text="Private Key:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.private_key_entry = ttk.Entry(keys_frame, width=60, show="*")  # Hide key for security
-        self.private_key_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
-
-        # Public Key
-        ttk.Label(keys_frame, text="Public Key:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Label(keys_frame, text=constants.PRIVATE_KEY_LABEL).grid(row=0, column=0, sticky=tk.W, padx=(0, 5), pady=2)
+        self.private_key_entry = ttk.Entry(keys_frame, width=60, show="*")
+        self.private_key_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=2)
+        ttk.Label(keys_frame, text=constants.PUBLIC_KEY_LABEL).grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=2)
         self.public_key_entry = ttk.Entry(keys_frame, width=60)
-        self.public_key_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
+        self.public_key_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 5), pady=2)
+        ttk.Button(keys_frame, text=constants.UPDATE_KEYS_BUTTON, command=self.update_keys).grid(row=0, column=2, rowspan=2, padx=(5, 0), pady=2)
 
-        # Update keys button
-        ttk.Button(keys_frame, text="Update Keys", command=self.update_keys).grid(row=0, column=2, rowspan=2,
-                                                                                  padx=(5, 0))
+    def _create_config_frame(self, parent):
+        config_frame = ttk.LabelFrame(parent, text=constants.ADD_PROXY_FRAME_TITLE, padding=(10, 5))
+        config_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10), padx=5)
+        config_frame.columnconfigure(1, weight=1)
 
-        # Proxy Configuration Frame
-        config_frame = ttk.LabelFrame(main_frame, text="Add New Proxy", padding="10")
-        config_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        # Left side of config frame
+        left_config_frame = ttk.Frame(config_frame)
+        left_config_frame.grid(row=0, column=0, sticky=tk.W)
 
-        # Country selection
-        ttk.Label(config_frame, text="Country:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Label(left_config_frame, text=constants.COUNTRY_LABEL).grid(row=0, column=0, sticky=tk.W, padx=(0, 5), pady=2)
         self.country_var = tk.StringVar()
-        self.country_combo = ttk.Combobox(config_frame, textvariable=self.country_var, state="readonly", width=30)
-        self.country_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.country_combo = ttk.Combobox(left_config_frame, textvariable=self.country_var, state="readonly", width=30)
+        self.country_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=2)
 
-        # Port selection
-        ttk.Label(config_frame, text="SOCKS5 Port:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
+        ttk.Label(left_config_frame, text=constants.SOCKS5_PORT_LABEL).grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=2)
         self.port_var = tk.IntVar(value=1080)
-        port_spinbox = ttk.Spinbox(config_frame, from_=1024, to=65535, textvariable=self.port_var, width=10)
-        port_spinbox.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
+        port_spinbox = ttk.Spinbox(left_config_frame, from_=1024, to=65535, textvariable=self.port_var, width=10)
+        port_spinbox.grid(row=1, column=1, sticky=tk.W, padx=(0, 10), pady=2)
 
-        # Buttons
-        ttk.Button(config_frame, text="+ Add Proxy", command=self.add_proxy).grid(row=0, column=4, padx=(10, 0))
-        ttk.Button(config_frame, text="🔄 Reload Servers", command=self.load_servers).grid(row=0, column=5, padx=(5, 0))
-        ttk.Button(config_frame, text="⚙️ Preferences", command=self.show_preferences).grid(row=0, column=6,
-                                                                                            padx=(5, 0))
+        # Right side of config frame
+        right_config_frame = ttk.Frame(config_frame)
+        right_config_frame.grid(row=0, column=1, sticky=tk.E, padx=(10,0))
 
-        # Proxy Management Frame
-        mgmt_frame = ttk.Frame(main_frame)
+        ttk.Button(right_config_frame, text=constants.ADD_PROXY_BUTTON, command=self.add_proxy).pack(side=tk.LEFT, padx=(0, 5), pady=2)
+        ttk.Button(right_config_frame, text=constants.RELOAD_SERVERS_BUTTON, command=self.load_servers).pack(side=tk.LEFT, padx=(0, 5), pady=2)
+        ttk.Button(right_config_frame, text=constants.PREFERENCES_BUTTON, command=self.show_preferences).pack(side=tk.LEFT, pady=2)
+
+    def _create_management_frame(self, parent):
+        mgmt_frame = ttk.Frame(parent)
         mgmt_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         mgmt_frame.columnconfigure(0, weight=2)
         mgmt_frame.columnconfigure(1, weight=1)
         mgmt_frame.rowconfigure(0, weight=1)
+        self._create_proxy_list_frame(mgmt_frame)
+        self._create_log_frame(mgmt_frame)
 
-        # Left side - Proxy list
-        left_frame = ttk.LabelFrame(mgmt_frame, text="Active Proxies", padding="5")
-        left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+    def _create_proxy_list_frame(self, parent):
+        left_frame = ttk.LabelFrame(parent, text=constants.ACTIVE_PROXIES_FRAME_TITLE, padding=(10, 5))
+        left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5), pady=5)
         left_frame.columnconfigure(0, weight=1)
         left_frame.rowconfigure(0, weight=1)
-
-        # Proxy listbox with scrollbar
         listbox_frame = ttk.Frame(left_frame)
-        listbox_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        listbox_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5, padx=5)
         listbox_frame.columnconfigure(0, weight=1)
         listbox_frame.rowconfigure(0, weight=1)
-
-        self.proxy_listbox = tk.Listbox(listbox_frame)
+        self.proxy_listbox = tk.Listbox(listbox_frame, height=15)
         self.proxy_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
         scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.proxy_listbox.yview)
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         self.proxy_listbox.configure(yscrollcommand=scrollbar.set)
+        self._create_proxy_buttons_frame(left_frame)
 
-        # Control buttons
-        btn_frame = ttk.Frame(left_frame)
-        btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
+    def _create_proxy_buttons_frame(self, parent):
+        btn_frame = ttk.Frame(parent)
+        btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0), padx=5)
 
-        ttk.Button(btn_frame, text="▶ Start", command=self.start_proxy).grid(row=0, column=0, padx=(0, 5))
-        ttk.Button(btn_frame, text="⏹ Stop", command=self.stop_proxy).grid(row=0, column=1, padx=(0, 5))
-        ttk.Button(btn_frame, text="🗑 Remove", command=self.remove_proxy).grid(row=0, column=2, padx=(0, 5))
-        ttk.Button(btn_frame, text="💾 Export Config", command=self.export_config).grid(row=0, column=3, padx=(0, 5))
-        ttk.Button(btn_frame, text="⏹ Stop All", command=self.stop_all_proxies).grid(row=0, column=4, padx=(0, 5))
-        ttk.Button(btn_frame, text="🔍 Show Config", command=self.show_config).grid(row=0, column=5, padx=(0, 5))
+        button_configs = [
+            (constants.START_BUTTON, self.start_proxy),
+            (constants.STOP_BUTTON, self.stop_proxy),
+            (constants.REMOVE_BUTTON, self.remove_proxy),
+            (constants.EXPORT_CONFIG_BUTTON, self.export_config),
+            (constants.STOP_ALL_BUTTON, self.stop_all_proxies),
+            (constants.SHOW_CONFIG_BUTTON, self.show_config),
+            ("Copy Address", self.copy_proxy_address)
+        ]
 
-        # Right side - Log
-        right_frame = ttk.LabelFrame(mgmt_frame, text="Log", padding="5")
-        right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+        for i, (text, command) in enumerate(button_configs):
+            ttk.Button(btn_frame, text=text, command=command).grid(row=0, column=i, padx=(0, 5), pady=2)
+
+    def _create_log_frame(self, parent):
+        right_frame = ttk.LabelFrame(parent, text=constants.LOG_FRAME_TITLE, padding=(10, 5))
+        right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0), pady=5)
         right_frame.columnconfigure(0, weight=1)
         right_frame.rowconfigure(0, weight=1)
+        self.log_text = scrolledtext.ScrolledText(right_frame, height=15, width=50, wrap=tk.WORD)
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5, padx=5)
+        self._create_log_buttons_frame(right_frame)
 
-        self.log_text = scrolledtext.ScrolledText(right_frame, height=20, width=50)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    def _create_log_buttons_frame(self, parent):
+        log_btn_frame = ttk.Frame(parent)
+        log_btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0), padx=5)
 
-        # Log control buttons
-        log_btn_frame = ttk.Frame(right_frame)
-        log_btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
+        button_configs = [
+            (constants.CLEAR_LOG_BUTTON, self.clear_log),
+            (constants.SAVE_LOG_BUTTON, self.save_log),
+            (constants.LOG_LEVEL_BUTTON, self.change_log_level)
+        ]
 
-        ttk.Button(log_btn_frame, text="Clear Log", command=self.clear_log).grid(row=0, column=0, padx=(0, 5))
-        ttk.Button(log_btn_frame, text="Save Log", command=self.save_log).grid(row=0, column=1, padx=(0, 5))
-        ttk.Button(log_btn_frame, text="Log Level", command=self.change_log_level).grid(row=0, column=2)
+        for i, (text, command) in enumerate(button_configs):
+            ttk.Button(log_btn_frame, text=text, command=command).grid(row=0, column=i, padx=(0, 5), pady=2)
 
-        # Add log level display
         level_names = {
             LogLevel.DEBUG: "DEBUG",
             LogLevel.INFO: "INFO",
@@ -2488,165 +2436,101 @@ class WireproxyManager:
         }
         current_level = level_names.get(self.settings.log_level, "UNKNOWN")
         self.log_level_label = ttk.Label(log_btn_frame, text=current_level, font=("Arial", 8))
-        self.log_level_label.grid(row=0, column=3, padx=(5, 0))
+        self.log_level_label.grid(row=0, column=len(button_configs), padx=(5, 0), pady=2)
 
-        # Status bar
-        self.status_label = ttk.Label(main_frame, text="Status: Starting...", relief="sunken")
+    def _create_status_bar(self, parent):
+        self.status_label = ttk.Label(parent, text=constants.STATUS_LABEL_DEFAULT, relief="sunken")
         self.status_label.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
 
-        # Handle window minimize
-        def on_minimize(event=None):
-            if self.settings.minimize_to_tray:
-                self.root.after(100, self.hide_to_tray)
-
-        self.root.bind('<Unmap>', on_minimize)
-
-        return self.root
+    def _on_minimize(self, event=None):
+        if self.settings.minimize_to_tray:
+            self.root.after(100, self.hide_to_tray)
 
     def auto_restart_proxies(self, auto_restart_list: List[int]):
         """Auto-restart proxies from saved state with improved error handling"""
         if not auto_restart_list:
-            self.log_message("No proxies marked for auto-restart", LogLevel.INFO)
+            self.log_message(constants.LOG_NO_PROXIES_TO_RESTART, LogLevel.INFO)
             return
+        self.log_message(constants.LOG_STARTING_AUTO_RESTART.format(count=len(auto_restart_list)), LogLevel.INFO)
+        self.thread_pool.submit(self._auto_restart_worker, auto_restart_list)
 
-        self.log_message(f"Starting auto-restart for {len(auto_restart_list)} proxies", LogLevel.INFO)
+    def _auto_restart_worker(self, auto_restart_list: List[int]):
+        try:
+            self.log_message(constants.LOG_AUTO_RESTART_THREAD_STARTED, LogLevel.INFO)
+            if not self._wait_for_servers():
+                return
 
-        def restart_worker():
+            self.log_message(constants.LOG_SERVERS_LOADED_AUTO_RESTART, LogLevel.INFO)
+            successful_restarts, failed_restarts = self._restart_proxies(auto_restart_list)
+            self.log_message(
+                constants.LOG_AUTO_RESTART_COMPLETED.format(successful=successful_restarts, failed=failed_restarts),
+                LogLevel.INFO
+            )
+        except Exception as e:
+            self.log_message(constants.LOG_AUTO_RESTART_WORKER_ERROR.format(error=str(e)), LogLevel.ERROR)
+
+    def _wait_for_servers(self, max_attempts=60, delay=1) -> bool:
+        for _ in range(max_attempts):
+            if self.shutdown_event.is_set():
+                self.log_message(constants.LOG_SHUTDOWN_REQUESTED_AUTO_RESTART, LogLevel.INFO)
+                return False
+            if self.state.get_servers():
+                return True
+            time.sleep(delay)
+        self.log_message(constants.LOG_SERVERS_NOT_LOADED_AUTO_RESTART, LogLevel.ERROR)
+        return False
+
+    def _restart_proxies(self, auto_restart_list: List[int]) -> tuple[int, int]:
+        successful_restarts = 0
+        failed_restarts = 0
+        for i, index in enumerate(auto_restart_list):
+            if self.shutdown_event.is_set():
+                self.log_message(constants.LOG_SHUTDOWN_REQUESTED_STOP_AUTO_RESTART, LogLevel.INFO)
+                break
             try:
-                self.log_message("Auto-restart thread started", LogLevel.INFO)
-
-                # Wait for servers to be loaded with better timeout handling
-                servers = self.state.get_servers()
-                attempts = 0
-                max_attempts = 60  # Wait up to 60 seconds
-
-                while not servers and attempts < max_attempts:
-                    if self.shutdown_event.is_set():
-                        self.log_message("Shutdown requested, cancelling auto-restart", LogLevel.INFO)
-                        return
-
-                    time.sleep(1)
-                    servers = self.state.get_servers()
-                    attempts += 1
-
-                if not servers:
-                    self.log_message("Servers never loaded, cannot auto-restart proxies", LogLevel.ERROR)
-                    return
-
-                self.log_message("Servers loaded, starting auto-restart...", LogLevel.INFO)
-
-                successful_restarts = 0
-                failed_restarts = 0
-
-                for i, index in enumerate(auto_restart_list):
-                    if self.shutdown_event.is_set():
-                        self.log_message("Shutdown requested, stopping auto-restart", LogLevel.INFO)
-                        break
-
-                    try:
-                        self.log_message(
-                            f"Auto-restarting proxy {i + 1}/{len(auto_restart_list)} (index {index})",
-                            LogLevel.INFO
-                        )
-
-                        # Schedule restart on main thread
-                        if self.root:
-                            self.root.after(0, lambda idx=index: self._start_proxy_by_index(idx))
-                            successful_restarts += 1
-
-                        time.sleep(3)  # Increased delay between restarts
-
-                    except Exception as e:
-                        failed_restarts += 1
-                        self.log_message(
-                            f"Failed to schedule auto-restart for proxy {index}: {str(e)}",
-                            LogLevel.ERROR
-                        )
-
-                self.log_message(
-                    f"Auto-restart completed: {successful_restarts} successful, {failed_restarts} failed",
-                    LogLevel.INFO
-                )
-
+                self.log_message(constants.LOG_AUTO_RESTARTING_PROXY.format(i=i + 1, total=len(auto_restart_list), index=index), LogLevel.INFO)
+                if self.root:
+                    self.root.after(0, lambda idx=index: self._start_proxy_by_index(idx))
+                    successful_restarts += 1
+                time.sleep(3)
             except Exception as e:
-                self.log_message(f"Auto-restart worker error: {str(e)}", LogLevel.ERROR)
+                failed_restarts += 1
+                self.log_message(constants.LOG_FAILED_TO_SCHEDULE_AUTO_RESTART.format(index=index, error=str(e)), LogLevel.ERROR)
+        return successful_restarts, failed_restarts
 
-        # Use thread pool for better management
-        self.thread_pool.submit(restart_worker)
+    def copy_proxy_address(self):
+        """Copy the selected proxy address to the clipboard."""
+        try:
+            if not self.proxy_listbox:
+                return
+
+            selection = self.proxy_listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a proxy to copy its address.")
+                return
+
+            index = selection[0]
+            instance = self.state.get_proxy_instance(index)
+
+            if not instance:
+                return
+
+            proxy_address = f"127.0.0.1:{instance.port}"
+            self.root.clipboard_clear()
+            self.root.clipboard_append(proxy_address)
+            self.log_message(f"Copied to clipboard: {proxy_address}", LogLevel.INFO)
+            messagebox.showinfo("Copied", f"Proxy address {proxy_address} copied to clipboard.")
+
+        except Exception as e:
+            self.log_message(f"Error copying proxy address: {str(e)}", LogLevel.ERROR)
+            messagebox.showerror("Error", f"Failed to copy proxy address: {str(e)}")
+
 
     def run(self):
         """Main application entry point with improved startup sequence"""
         try:
-            # Clean up any leftover temp files from previous runs
-            StateManager.cleanup_temp_files(self.state)
-
-            # Create GUI
-            self.create_gui()
-
-            # Create tray icon
-            self.create_tray_icon()
-
-            # Initialize logging
-            if not self.settings.start_minimized:
-                self.log_message("=" * 60, LogLevel.INFO)
-                self.log_message("SurfShark Wireproxy Manager started", LogLevel.INFO)
-                self.log_message(f"Python version: {sys.version}", LogLevel.INFO)
-                self.log_message(f"Platform: {os.name}", LogLevel.INFO)
-                self.log_message(f"Working directory: {os.getcwd()}", LogLevel.INFO)
-                self.log_message("=" * 60, LogLevel.INFO)
-
-            # Start process monitoring
-            self.start_monitoring()
-
-            # Load servers
-            self.load_servers()
-
-            # Load saved state and get auto-restart list
-            def delayed_state_load():
-                servers = self.state.get_servers()
-                if servers:
-                    if not self.settings.start_minimized:
-                        self.log_message("Servers loaded, now loading state...", LogLevel.INFO)
-
-                    auto_restart_list = StateManager.load_state(self.state)
-
-                    # Update GUI with loaded keys
-                    private_key, public_key = self.state.get_keys()
-                    if self.private_key_entry and private_key:
-                        self.private_key_entry.delete(0, tk.END)
-                        self.private_key_entry.insert(0, private_key)
-                    if self.public_key_entry and public_key:
-                        self.public_key_entry.delete(0, tk.END)
-                        self.public_key_entry.insert(0, public_key)
-
-                    # Update proxy list
-                    self.gui_queue.put_proxy_list_update()
-
-                    # Auto-restart if enabled
-                    if self.settings.auto_start_proxies and auto_restart_list:
-                        self.auto_restart_proxies(auto_restart_list)
-
-                else:
-                    if not self.settings.start_minimized:
-                        self.log_message("Servers not loaded yet, retrying in 2 seconds...", LogLevel.WARNING)
-                    if self.root and not self.shutdown_event.is_set():
-                        self.root.after(2000, delayed_state_load)
-
-            # Delay state loading to ensure servers are loaded first
-            if self.root:
-                self.root.after(3000, delayed_state_load)
-
-            # Start GUI message processing
-            self.process_gui_messages()
-
-            # Handle startup minimized
-            if self.settings.start_minimized:
-                self.root.after(100, self.hide_to_tray)
-                threading.Thread(target=self.tray_icon.run, daemon=True).start()
-
-            # Start GUI main loop
-            self.root.mainloop()
-
+            self._initialize_app()
+            self._run_main_loop()
         except KeyboardInterrupt:
             self.log_message("Received keyboard interrupt, shutting down...", LogLevel.INFO)
             self.on_closing()
@@ -2655,11 +2539,62 @@ class WireproxyManager:
             logger.exception("Unexpected error in main loop")
             raise
         finally:
-            # Ensure cleanup
-            try:
-                self.thread_pool.shutdown(wait=False, cancel_futures=True)
-            except:
-                pass
+            self._cleanup()
+
+    def _initialize_app(self):
+        StateManager.cleanup_temp_files(self.state)
+        self.create_gui()
+        self.create_tray_icon()
+        self._log_startup_info()
+        self.start_monitoring()
+        self.load_servers()
+        self.root.after(3000, self._delayed_state_load)
+        self.process_gui_messages()
+
+    def _log_startup_info(self):
+        if not self.settings.start_minimized:
+            self.log_message("=" * 60, LogLevel.INFO)
+            self.log_message(constants.LOG_APP_STARTED, LogLevel.INFO)
+            self.log_message(constants.LOG_PYTHON_VERSION.format(version=sys.version), LogLevel.INFO)
+            self.log_message(constants.LOG_PLATFORM.format(platform=os.name), LogLevel.INFO)
+            self.log_message(constants.LOG_WORKING_DIR.format(directory=os.getcwd()), LogLevel.INFO)
+            self.log_message("=" * 60, LogLevel.INFO)
+
+    def _delayed_state_load(self):
+        if self._wait_for_servers(max_attempts=1, delay=0):
+            if not self.settings.start_minimized:
+                self.log_message(constants.LOG_SERVERS_LOADED_NOW_LOADING_STATE, LogLevel.INFO)
+            auto_restart_list = StateManager.load_state(self.state)
+            self._update_gui_with_loaded_keys()
+            self.gui_queue.put_proxy_list_update()
+            if self.settings.auto_start_proxies and auto_restart_list:
+                self.auto_restart_proxies(auto_restart_list)
+        else:
+            if not self.settings.start_minimized:
+                self.log_message(constants.LOG_SERVERS_NOT_LOADED_RETRY, LogLevel.WARNING)
+            if self.root and not self.shutdown_event.is_set():
+                self.root.after(2000, self._delayed_state_load)
+
+    def _update_gui_with_loaded_keys(self):
+        private_key, public_key = self.state.get_keys()
+        if self.private_key_entry and private_key:
+            self.private_key_entry.delete(0, tk.END)
+            self.private_key_entry.insert(0, private_key)
+        if self.public_key_entry and public_key:
+            self.public_key_entry.delete(0, tk.END)
+            self.public_key_entry.insert(0, public_key)
+
+    def _run_main_loop(self):
+        if self.settings.start_minimized:
+            self.root.after(100, self.hide_to_tray)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        self.root.mainloop()
+
+    def _cleanup(self):
+        try:
+            self.thread_pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
 
 def main():
@@ -2668,10 +2603,10 @@ def main():
         app = WireproxyManager()
         app.run()
     except Exception as e:
-        logger.exception("Fatal error starting application")
+        logger.exception(constants.LOG_FATAL_ERROR)
         try:
             import tkinter.messagebox as mb
-            mb.showerror("Fatal Error", f"Failed to start application: {str(e)}")
+            mb.showerror(constants.FATAL_ERROR_TITLE, constants.FATAL_ERROR_MESSAGE.format(error=str(e)))
         except:
             print(f"Fatal error: {e}")
 
