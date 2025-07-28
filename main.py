@@ -9,7 +9,6 @@ import tempfile
 import time
 import psutil
 from datetime import datetime
-import pystray
 from PIL import Image, ImageDraw
 import atexit
 from tkinter import BooleanVar
@@ -2196,6 +2195,7 @@ class WireproxyManager:
 
     def create_tray_icon(self):
         """Create system tray icon"""
+        import pystray
 
         def create_icon_image():
             width = 64
@@ -2205,13 +2205,17 @@ class WireproxyManager:
             draw.ellipse([16, 16, 48, 48], fill='white')
             return image
 
-        menu = pystray.Menu(
-            pystray.MenuItem("Show", self.show_from_tray),
-            pystray.MenuItem("Preferences", self.show_preferences),
-            pystray.MenuItem("Quit", self.quit_from_tray)
-        )
+        try:
+            menu = pystray.Menu(
+                pystray.MenuItem("Show", self.show_from_tray),
+                pystray.MenuItem("Preferences", self.show_preferences),
+                pystray.MenuItem("Quit", self.quit_from_tray)
+            )
 
-        self.tray_icon = pystray.Icon("wireproxy", create_icon_image(), "Wireproxy Manager", menu)
+            self.tray_icon = pystray.Icon("wireproxy", create_icon_image(), "Wireproxy Manager", menu)
+        except Exception as e:
+            self.log_message(f"Failed to create tray icon: {e}", LogLevel.WARNING)
+            self.tray_icon = None
 
     def show_from_tray(self, icon=None, item=None):
         """Show window from tray"""
@@ -2287,30 +2291,38 @@ class WireproxyManager:
 
     def create_gui(self):
         """Create the main GUI with wireproxy executable check"""
-        self.root = tk.Tk()
-        self.root.title(constants.TITLE)
-        self.root.geometry("1000x700")
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        try:
+            self.root = tk.Tk()
+            self.root.title(constants.TITLE)
+            self.root.geometry("1000x700")
+            self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        if not ProcessManager.find_wireproxy_executable():
-            self.log_message("wireproxy executable not found in PATH", LogLevel.ERROR)
-            messagebox.showerror(
-                constants.MISSING_DEPENDENCY_TITLE,
-                constants.MISSING_DEPENDENCY_MESSAGE
-            )
+            if not ProcessManager.find_wireproxy_executable():
+                self.log_message("wireproxy executable not found in PATH", LogLevel.ERROR)
+                messagebox.showerror(
+                    constants.MISSING_DEPENDENCY_TITLE,
+                    constants.MISSING_DEPENDENCY_MESSAGE
+                )
 
-        if self.settings.start_minimized:
+            if self.settings.start_minimized:
+                self.root.withdraw()
+
+            main_frame = self._create_main_frame()
+            self._create_keys_frame(main_frame)
+            self._create_config_frame(main_frame)
+            self._create_management_frame(main_frame)
+            self._create_status_bar(main_frame)
+
+            self.root.bind('<Unmap>', self._on_minimize)
+
+            return self.root
+        except tk.TclError as e:
+            self.log_message(f"Failed to create GUI: {e}", LogLevel.ERROR)
+            self.log_message("Running in headless mode.", LogLevel.INFO)
+            # Create a dummy root window for headless operation
+            self.root = tk.Tk()
             self.root.withdraw()
-
-        main_frame = self._create_main_frame()
-        self._create_keys_frame(main_frame)
-        self._create_config_frame(main_frame)
-        self._create_management_frame(main_frame)
-        self._create_status_bar(main_frame)
-
-        self.root.bind('<Unmap>', self._on_minimize)
-
-        return self.root
+            return self.root
 
     def _create_main_frame(self):
         style = ttk.Style()
@@ -2525,6 +2537,27 @@ class WireproxyManager:
             self.log_message(f"Error copying proxy address: {str(e)}", LogLevel.ERROR)
             messagebox.showerror("Error", f"Failed to copy proxy address: {str(e)}")
 
+    def run_headless(self):
+        """Run the application in headless mode."""
+        self.log_message("Running in headless mode.", LogLevel.INFO)
+        StateManager.cleanup_temp_files(self.state)
+        self.start_monitoring()
+        self.load_servers()
+        # In headless mode, we can wait for servers to load before proceeding
+        self._wait_for_servers()
+        auto_restart_list = StateManager.load_state(self.state)
+        if self.settings.auto_start_proxies and auto_restart_list:
+            self.auto_restart_proxies(auto_restart_list)
+
+        # Keep the main thread alive to allow background threads to run
+        try:
+            while not self.shutdown_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.log_message("Received keyboard interrupt, shutting down...", LogLevel.INFO)
+        finally:
+            self.on_closing()
+            self._cleanup()
 
     def run(self):
         """Main application entry point with improved startup sequence"""
@@ -2599,17 +2632,27 @@ class WireproxyManager:
 
 def main():
     """Application entry point"""
+    import argparse
+    parser = argparse.ArgumentParser(description="Wireproxy Manager")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode without GUI")
+    args = parser.parse_args()
+
     try:
         app = WireproxyManager()
-        app.run()
+        if args.headless:
+            app.run_headless()
+        else:
+            app.run()
     except Exception as e:
         logger.exception(constants.LOG_FATAL_ERROR)
-        try:
-            import tkinter.messagebox as mb
-            mb.showerror(constants.FATAL_ERROR_TITLE, constants.FATAL_ERROR_MESSAGE.format(error=str(e)))
-        except:
+        if not args.headless:
+            try:
+                import tkinter.messagebox as mb
+                mb.showerror(constants.FATAL_ERROR_TITLE, constants.FATAL_ERROR_MESSAGE.format(error=str(e)))
+            except:
+                print(f"Fatal error: {e}")
+        else:
             print(f"Fatal error: {e}")
-
 
 if __name__ == "__main__":
     main()
