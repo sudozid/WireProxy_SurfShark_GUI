@@ -1,0 +1,370 @@
+# constants.py
+
+# API and Endpoints
+API_ENDPOINT = "https://api.surfshark.com/v4/server/clusters/generic"
+GITHUB_API_URL = "https://api.github.com/repos/whyvl/wireproxy/releases/latest"
+GITHUB_RELEASES_URL = "https://github.com/whyvl/wireproxy/releases/latest"
+FALLBACK_RELEASE_URL = "https://github.com/whyvl/wireproxy/releases/download/v1.0.9/"
+
+# File and Path Names
+SETTINGS_FILE = "wireproxy_settings.json"
+STATE_FILE = "wireproxy_state.json"
+CACHE_FILE = "wireproxy_servers_cache.json"
+WIREGUARD_CONFIG_SUFFIX = ".conf"
+LOG_FILE_SUFFIX = ".log"
+
+# Application Info
+APP_NAME = "SurfShark Wireproxy Manager"
+APP_VERSION = "1.1.0"
+APP_REPOSITORY_URL = "https://github.com/sudozid/WireProxy_SurfShark_GUI"
+PYTHON_VERSION_INFO = f"Python version"
+PLATFORM_INFO = f"Platform"
+WORKING_DIRECTORY_INFO = f"Working directory"
+
+# GUI Text and Labels
+TITLE = APP_NAME
+KEYS_FRAME_TITLE = "WireGuard Keys"
+PRIVATE_KEY_LABEL = "Private Key:"
+PUBLIC_KEY_LABEL = "Public Key:"
+UPDATE_KEYS_BUTTON = "Update Keys"
+ADD_PROXY_FRAME_TITLE = "Add New Proxy"
+COUNTRY_LABEL = "Country:"
+SOCKS5_PORT_LABEL = "SOCKS5 Port:"
+ADD_PROXY_BUTTON = "+ Add Proxy"
+RELOAD_SERVERS_BUTTON = "🔄 Reload Servers"
+PREFERENCES_BUTTON = "⚙️ Preferences"
+ACTIVE_PROXIES_FRAME_TITLE = "Active Proxies"
+START_BUTTON = "▶ Start"
+STOP_BUTTON = "⏹ Stop"
+REMOVE_BUTTON = "🗑 Remove"
+EXPORT_CONFIG_BUTTON = "💾 Export Config"
+STOP_ALL_BUTTON = "⏹ Stop All"
+SHOW_CONFIG_BUTTON = "🔍 Show Config"
+LOG_FRAME_TITLE = "Log"
+CLEAR_LOG_BUTTON = "Clear Log"
+SAVE_LOG_BUTTON = "Save Log"
+LOG_LEVEL_BUTTON = "Log Level"
+STATUS_LABEL_DEFAULT = "Status: Starting..."
+PREFERENCES_TITLE = "Preferences"
+STARTUP_OPTIONS_FRAME_TITLE = "Startup Options"
+START_MINIMIZED_CHECKBOX = "Start minimized to system tray"
+AUTO_START_PROXIES_CHECKBOX = "Auto-start previously running proxies"
+API_CONFIG_FRAME_TITLE = "API Configuration"
+API_ENDPOINT_LABEL = "SurfShark API Endpoint:"
+API_ENDPOINT_INFO = "• Change this if the default endpoint stops working\n• Restart required after changing"
+RESET_TO_DEFAULT_BUTTON = "Reset to Default"
+SYSTEM_TRAY_FRAME_TITLE = "System Tray"
+MINIMIZE_TO_TRAY_CHECKBOX = "Minimize to system tray instead of taskbar"
+TRAY_INFO = "• Right-click tray icon for menu\n• Double-click to show/hide window"
+APPEARANCE_FRAME_TITLE = "Appearance"
+DARK_MODE_CHECKBOX = "Enable dark mode"
+DARK_MODE_INFO = "• Dark mode provides a modern dark theme for better viewing in low light\n• Theme changes apply immediately when preferences are saved\n• Affects all windows, dialogs, and UI elements"
+LOGGING_FRAME_TITLE = "Logging"
+CURRENT_LOG_LEVEL_LABEL = "Current log level:"
+CHANGE_LOG_LEVEL_BUTTON = "Change Log Level"
+ABOUT_FRAME_TITLE = "About & System Info"
+ABOUT_TEXT = f"{APP_NAME}\nVersion {APP_VERSION}\nManage multiple SOCKS5 proxies via WireGuard"
+WIREDPROXY_BINARY_FRAME_TITLE = "wireproxy Binary"
+WIREDPROXY_STATUS_LABEL = "Status: "
+WIREDPROXY_FOUND_STATUS = "✓ Found"
+WIREDPROXY_NOT_FOUND_STATUS = "✗ Not found"
+WIREDPROXY_LOCATION_LABEL = "Location: "
+WIREDPROXY_SIZE_LABEL = "Size: "
+WIREDPROXY_MODIFIED_LABEL = "Modified: "
+WIREDPROXY_VERSION_LABEL = "Version: "
+DOWNLOAD_LATEST_BUTTON = "Download Latest Version"
+CHECK_LATEST_BUTTON = "Check Latest Version"
+DOWNLOAD_INFO = "• Downloads from: https://github.com/whyvl/wireproxy/releases\n• Automatically detects your platform and architecture\n• Replaces existing binary if found"
+
+# Messages and Dialogs
+MISSING_DEPENDENCY_TITLE = "Missing Dependency"
+MISSING_DEPENDENCY_MESSAGE = "wireproxy executable not found in PATH or current directory.\n\nPlease install wireproxy and ensure it's in your PATH, or place the executable in the same directory as this application.\n\nDownload from: https://github.com/octeep/wireproxy"
+WIREGUARD_KEYS_NOT_CONFIGURED_TITLE = "Error"
+WIREGUARD_KEYS_NOT_CONFIGURED_MESSAGE = "Please configure WireGuard keys first"
+NO_COUNTRY_SELECTED_TITLE = "Error"
+NO_COUNTRY_SELECTED_MESSAGE = "Please select a country"
+INVALID_PORT_TITLE = "Error"
+INVALID_PORT_MESSAGE = "Please enter a valid port (1024-65535)"
+PORT_IN_USE_TITLE = "Error"
+PORT_IN_USE_MESSAGE = "Port {port} is already in use"
+PORT_IN_USE_BY_OTHER_APP_TITLE = "Error"
+PORT_IN_USE_BY_OTHER_APP_MESSAGE = "Port {port} is already in use by another application"
+SERVERS_NOT_LOADED_TITLE = "Error"
+SERVERS_NOT_LOADED_MESSAGE = "Servers not loaded. Please wait or reload servers."
+NO_SERVERS_FOUND_TITLE = "Error"
+NO_SERVERS_FOUND_MESSAGE = "No servers found for {country}"
+COULD_NOT_SELECT_SERVER_TITLE = "Error"
+COULD_NOT_SELECT_SERVER_MESSAGE = "Could not select server for {country}"
+ADD_PROXY_ERROR_TITLE = "Error"
+ADD_PROXY_ERROR_MESSAGE = "Failed to add proxy: {error}"
+REMOVE_PROXY_WARNING_TITLE = "Warning"
+REMOVE_PROXY_WARNING_MESSAGE = "Please select a proxy to remove"
+REMOVE_PROXY_ERROR_TITLE = "Error"
+REMOVE_PROXY_ERROR_MESSAGE = "Failed to remove proxy: {error}"
+START_PROXY_WARNING_TITLE = "Warning"
+START_PROXY_WARNING_MESSAGE = "Please select a proxy to start"
+START_PROXY_ERROR_TITLE = "Error"
+START_PROXY_ERROR_MESSAGE = "Failed to start proxy: {error}"
+STOP_PROXY_WARNING_TITLE = "Warning"
+STOP_PROXY_WARNING_MESSAGE = "Please select a proxy to stop"
+STOP_PROXY_ERROR_TITLE = "Error"
+STOP_PROXY_ERROR_MESSAGE = "Failed to stop proxy: {error}"
+EXPORT_CONFIG_WARNING_TITLE = "Warning"
+EXPORT_CONFIG_WARNING_MESSAGE = "Please select a proxy to export"
+EXPORT_CONFIG_SUCCESS_TITLE = "Success"
+EXPORT_CONFIG_SUCCESS_MESSAGE = "Config exported to {filename}"
+EXPORT_CONFIG_ERROR_TITLE = "Error"
+EXPORT_CONFIG_ERROR_MESSAGE = "Failed to export config: {error}"
+SHOW_CONFIG_WARNING_TITLE = "Warning"
+SHOW_CONFIG_WARNING_MESSAGE = "Please select a proxy"
+SAVE_LOG_SUCCESS_TITLE = "Success"
+SAVE_LOG_SUCCESS_MESSAGE = "Log saved to {filename}"
+SAVE_LOG_ERROR_TITLE = "Error"
+SAVE_LOG_ERROR_MESSAGE = "Failed to save log: {error}"
+API_ENDPOINT_EMPTY_TITLE = "Error"
+API_ENDPOINT_EMPTY_MESSAGE = "API endpoint cannot be empty"
+API_ENDPOINT_INVALID_TITLE = "Error"
+API_ENDPOINT_INVALID_MESSAGE = "API endpoint must start with http:// or https://"
+API_ENDPOINT_CHANGED_TITLE = "API Endpoint Changed"
+API_ENDPOINT_CHANGED_MESSAGE = "API endpoint has been updated. You may want to reload servers to test the new endpoint."
+LATEST_VERSION_TITLE = "Latest Version"
+LATEST_VERSION_MESSAGE = "Latest wireproxy version: {version}\nPublished: {date}\n\nGitHub: https://github.com/whyvl/wireproxy/releases/latest"
+LATEST_VERSION_ERROR_TITLE = "Error"
+LATEST_VERSION_ERROR_MESSAGE = "Failed to check latest version: {error}"
+DOWNLOAD_SUCCESS_TITLE = "Success"
+DOWNLOAD_SUCCESS_MESSAGE = "Latest wireproxy version downloaded successfully!"
+DOWNLOAD_ERROR_TITLE = "Error"
+DOWNLOAD_ERROR_MESSAGE = "Failed to download wireproxy. Please check your internet connection and try again."
+DOWNLOAD_FAILED_TITLE = "Download Failed"
+DOWNLOAD_FAILED_MESSAGE = "Failed to download wireproxy automatically.\n\nPlease download manually from:\nhttps://github.com/whyvl/wireproxy/releases/latest\n\nThe application will continue but proxy starting will fail."
+FATAL_ERROR_TITLE = "Fatal Error"
+FATAL_ERROR_MESSAGE = "Failed to start application: {error}"
+
+# Logging Messages
+LOG_APP_STARTED = "SurfShark Wireproxy Manager started"
+LOG_PYTHON_VERSION = "Python version: {version}"
+LOG_PLATFORM = "Platform: {platform}"
+LOG_WORKING_DIR = "Working directory: {directory}"
+LOG_APP_SHUTTING_DOWN = "Application shutting down..."
+LOG_STOPPING_PROXIES = "Stopping {count} running proxies..."
+LOG_MONITOR_THREAD_FINISHED = "Monitor thread did not finish cleanly"
+LOG_THREAD_POOL_SHUTDOWN_ERROR = "Error shutting down thread pool: {error}"
+LOG_APP_SHUTDOWN_COMPLETE = "Application shutdown complete"
+LOG_UNEXPECTED_ERROR = "Unexpected error in main loop: {error}"
+LOG_FATAL_ERROR = "Fatal error starting application"
+LOG_NO_PROXIES_TO_RESTART = "No proxies marked for auto-restart"
+LOG_STARTING_AUTO_RESTART = "Starting auto-restart for {count} proxies"
+LOG_AUTO_RESTART_THREAD_STARTED = "Auto-restart thread started"
+LOG_SHUTDOWN_REQUESTED_AUTO_RESTART = "Shutdown requested, cancelling auto-restart"
+LOG_SERVERS_NOT_LOADED_AUTO_RESTART = "Servers never loaded, cannot auto-restart proxies"
+LOG_SERVERS_LOADED_AUTO_RESTART = "Servers loaded, starting auto-restart..."
+LOG_AUTO_RESTARTING_PROXY = "Auto-restarting proxy {i}/{total} (index {index})"
+LOG_SHUTDOWN_REQUESTED_STOP_AUTO_RESTART = "Shutdown requested, stopping auto-restart"
+LOG_FAILED_TO_SCHEDULE_AUTO_RESTART = "Failed to schedule auto-restart for proxy {index}: {error}"
+LOG_AUTO_RESTART_COMPLETED = "Auto-restart completed: {successful} successful, {failed} failed"
+LOG_AUTO_RESTART_WORKER_ERROR = "Auto-restart worker error: {error}"
+LOG_SERVERS_LOADED_NOW_LOADING_STATE = "Servers loaded, now loading state..."
+LOG_SERVERS_NOT_LOADED_RETRY = "Servers not loaded yet, retrying in 2 seconds..."
+
+# Status Messages
+STATUS_LOADING_SERVERS = "Loading servers..."
+STATUS_ERROR_LOADING_SERVERS = "Error loading servers"
+STATUS_READY = "Ready - {countries} countries, {locations} locations"
+
+# Tray Icon
+TRAY_ICON_TITLE = "Wireproxy Manager"
+TRAY_MENU_SHOW = "Show"
+TRAY_MENU_PREFERENCES = "Preferences"
+TRAY_MENU_QUIT = "Quit"
+
+# Wireproxy Platforms
+PLATFORM_WINDOWS = "windows"
+PLATFORM_LINUX = "linux"
+PLATFORM_MACOS = "darwin"
+
+# Wireproxy Architectures
+ARCH_AMD64 = "amd64"
+ARCH_X86_64 = "x86_64"
+ARCH_386 = "386"
+ARCH_I386 = "i386"
+ARCH_AARCH64 = "aarch64"
+ARCH_ARM64 = "arm64"
+ARCH_ARM = "arm"
+ARCH_MIPS = "mips"
+ARCH_MIPSLE = "mipsle"
+ARCH_RISCV64 = "riscv64"
+ARCH_S390X = "s390x"
+
+# Wireproxy Executable Names
+EXE_NAME_WINDOWS = "wireproxy.exe"
+EXE_NAME_LINUX = "wireproxy"
+EXE_NAME_MACOS = "wireproxy"
+
+# Wireproxy Filename Templates
+FILENAME_TEMPLATE_WINDOWS_AMD64 = "wireproxy_windows_amd64.tar.gz"
+FILENAME_TEMPLATE_WINDOWS_386 = "wireproxy_windows_386.tar.gz"
+FILENAME_TEMPLATE_LINUX_ARM64 = "wireproxy_linux_arm64.tar.gz"
+FILENAME_TEMPLATE_LINUX_ARM = "wireproxy_linux_arm.tar.gz"
+FILENAME_TEMPLATE_LINUX_MIPSLE = "wireproxy_linux_mipsle.tar.gz"
+FILENAME_TEMPLATE_LINUX_MIPS = "wireproxy_linux_mips.tar.gz"
+FILENAME_TEMPLATE_LINUX_RISCV64 = "wireproxy_linux_riscv64.tar.gz"
+FILENAME_TEMPLATE_LINUX_S390X = "wireproxy_linux_s390x.tar.gz"
+FILENAME_TEMPLATE_LINUX_386 = "wireproxy_linux_386.tar.gz"
+FILENAME_TEMPLATE_LINUX_AMD64 = "wireproxy_linux_amd64.tar.gz"
+FILENAME_TEMPLATE_MACOS_ARM64 = "wireproxy_darwin_arm64.tar.gz"
+FILENAME_TEMPLATE_MACOS_AMD64 = "wireproxy_darwin_amd64.tar.gz"
+
+# Theme and Color Schemes
+THEME_LIGHT = "light"
+THEME_DARK = "dark"
+
+LIGHT_THEME = {
+    # Backgrounds
+    "bg": "#f7fafd",                  # Lighter, modern main background
+    "frame_bg": "#eceff1",            # Cards/panels, distinct from bg
+    "labelframe_bg": "#eceff1",       # Match frame_bg for consistency
+
+    # Foregrounds
+    "fg": "#212121",
+    "frame_fg": "#212121",
+    "labelframe_fg": "#212121",
+
+    # Selection
+    "select_bg": "#3399ff",
+    "select_fg": "#ffffff",           # Better contrast for accessibility
+
+    # Inputs
+    "entry_bg": "#ffffff",            # Pure white for input fields
+    "entry_fg": "#212121",
+    "entry_disabled_bg": "#f5f5f5",
+    "entry_disabled_fg": "#999999",   # Slightly lighter for clarity
+    "entry_border": "#c2c9ce",        # Slightly darker border
+
+    # Buttons
+    "button_bg": "#f6f8fa",           # Very light gray
+    "button_fg": "#212121",
+    "button_active_bg": "#e3ecfa",    # Soft blue hint for pressed/active
+    "button_active_fg": "#212121",
+    "button_border": "#c2c9ce",
+
+    # Button hover effect (optional, if supported)
+    "hover_bg": "#eaf3fb",            # Blue-tinted hover
+
+    # Listboxes
+    "listbox_bg": "#ffffff",
+    "listbox_fg": "#212121",
+    "listbox_select_bg": "#3399ff",
+    "listbox_select_fg": "#ffffff",
+
+    # Text widget
+    "text_bg": "#f6f8fa",
+    "text_fg": "#212121",
+
+    # Scrollbars
+    "scrollbar_bg": "#eceff1",
+    "scrollbar_fg": "#b0b0b0",
+    "scrollbar_active": "#3399ff",
+
+    # Borders and focus
+    "border": "#c2c9ce",
+    "focus_border": "#3399ff",
+    "highlight_border": "#e0e0e0",
+    "disabled_border": "#e6e6e6",
+    "labelframe_border": "#c2c9ce",
+
+    # Status colors
+    "status_running": "#22b573",
+    "status_stopped": "#f44336",
+    "status_starting": "#ff9800",
+    "status_error": "#dc143c",
+
+    # Log level colors
+    "log_debug": "#808080",
+    "log_info": "#1565c0",
+    "log_warning": "#ff9800",
+    "log_error": "#dc143c",
+
+    # Accent and indicators
+    "accent": "#3399ff",
+    "secondary_fg": "#666666",
+    "success_fg": "#22b573",
+    "error_fg": "#dc143c",
+    "warning_fg": "#ff9800",
+}
+
+
+
+DARK_THEME = {
+    # Backgrounds
+    "bg": "#16181a",                  # Deep, soft black for app background
+    "frame_bg": "#202327",            # Panels/cards, lighter than bg
+    "labelframe_bg": "#202327",       # Match frame_bg for consistency
+
+    # Foregrounds
+    "fg": "#e0e0e0",
+    "frame_fg": "#e0e0e0",
+    "labelframe_fg": "#e0e0e0",
+
+    # Selection
+    "select_bg": "#3399ff",
+    "select_fg": "#ffffff",
+
+    # Inputs
+    "entry_bg": "#23272b",            # Slightly lighter than panel for field effect
+    "entry_fg": "#e0e0e0",
+    "entry_disabled_bg": "#16181a",
+    "entry_disabled_fg": "#666666",   # Subtle, less contrast
+    "entry_border": "#374151",        # Modern, visible but soft
+
+    # Buttons
+    "button_bg": "#23272b",           # Same as entry_bg for consistent elevation
+    "button_fg": "#e0e0e0",
+    "button_active_bg": "#212e39",    # Blue-tinted dark for "pressed" look
+    "button_active_fg": "#e0e0e0",
+    "button_border": "#374151",
+
+    # Button hover effect (optional, if supported)
+    "hover_bg": "#253142",            # Subtle blueish hover
+
+    # Listboxes
+    "listbox_bg": "#23272b",
+    "listbox_fg": "#e0e0e0",
+    "listbox_select_bg": "#3399ff",
+    "listbox_select_fg": "#ffffff",
+
+    # Text widget
+    "text_bg": "#23272b",
+    "text_fg": "#e0e0e0",
+
+    # Scrollbars
+    "scrollbar_bg": "#202327",
+    "scrollbar_fg": "#43464b",
+    "scrollbar_active": "#3399ff",
+
+    # Borders and focus
+    "border": "#374151",
+    "focus_border": "#3399ff",
+    "highlight_border": "#22272a",
+    "disabled_border": "#23272b",
+    "labelframe_border": "#374151",
+
+    # Status colors
+    "status_running": "#43d18d",
+    "status_stopped": "#f44336",
+    "status_starting": "#ff9800",
+    "status_error": "#dc143c",
+
+    # Log level colors
+    "log_debug": "#888888",
+    "log_info": "#42aaff",
+    "log_warning": "#ffa726",
+    "log_error": "#ef5350",
+
+    # Accent and indicators
+    "accent": "#3399ff",
+    "secondary_fg": "#999999",
+    "success_fg": "#43d18d",
+    "error_fg": "#f44336",
+    "warning_fg": "#ff9800",
+}
+
